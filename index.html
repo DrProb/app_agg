@@ -1,13 +1,327 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LyricLearner — Auswendig lernen</title>
+  <style>
+    /* Phone-first, clean minimal UI */
+    :root{
+      --bg:#0f1724;
+      --card:#0b1220;
+      --muted:#9aa4b2;
+      --accent:#7dd3fc;
+      --good:#34d399;
+      --danger:#fb7185;
+      --glass: rgba(255,255,255,0.03);
+      --radius:14px;
+      color-scheme: dark;
+      font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+    }
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#071029 0%, #071320 100%);color:white}
+    .app{min-height:100vh;display:flex;flex-direction:column;padding:14px;gap:12px;max-width:1000px;margin:0 auto}
 
+    header{display:flex;align-items:center;gap:12px}
+    header h1{font-size:18px;margin:0}
+    header p{margin:0;color:var(--muted);font-size:12px}
+
+    .card{background:var(--card);border-radius:16px;padding:12px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
+
+    .controls{display:flex;gap:8px;align-items:center}
+    .controls textarea{flex:1;min-height:120px;border-radius:12px;padding:10px;background:var(--glass);border:1px solid rgba(255,255,255,0.03);color:inherit;resize:vertical}
+
+    .row{display:flex;gap:8px}
+    .btn{background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent);border:1px solid rgba(255,255,255,0.05);padding:8px 12px;border-radius:12px;color:var(--accent);font-weight:600;font-size:14px}
+    .btn.ghost{background:transparent;color:var(--muted)}
+    .btn.warn{color:var(--danger)}
+    .btn.good{color:var(--good)}
+
+    .display{flex:1;min-height:180px;overflow:auto;padding:12px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent)}
+    .lyrics{line-height:1.6;font-size:18px}
+    .lyrics .sp{white-space:pre-wrap}
+
+    .unrevealed{display:inline-block;border-bottom:2px dashed rgba(255,255,255,0.07);margin:0 3px;padding:2px 4px;border-radius:6px;background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent)}
+    .revealed{display:inline-block;margin:0 3px;padding:2px 4px;border-radius:6px}
+    .revealed strong{font-weight:600}
+
+    /* bottom input bar */
+    .bottom{position:sticky;bottom:12px;display:flex;gap:8px;align-items:center;padding:8px}
+    .guess{flex:1;display:flex;gap:8px}
+    .guess input{flex:1;padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,0.05);background:transparent;color:inherit;font-size:16px}
+    .small{font-size:13px;color:var(--muted)}
+
+    .progress-wrap{display:flex;align-items:center;gap:8px}
+    .progress{height:10px;background:rgba(255,255,255,0.04);border-radius:999px;overflow:hidden;width:160px}
+    .progress > i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),#60a5fa);width:0%}
+
+    footer{display:flex;justify-content:space-between;gap:8px;align-items:center}
+
+    /* responsive tweaks */
+    @media(min-width:720px){
+      .controls{flex-direction:row}
+      .controls textarea{min-height:180px}
+      .display{min-height:260px}
+    }
+
+    /* helper feedback */
+    .flash{animation:flash 900ms ease}
+    @keyframes flash{0%{transform:translateY(6px);opacity:0}60%{transform:none;opacity:1}100%{transform:none;opacity:1}}
+
+    .meta{display:flex;gap:12px;align-items:center}
+  </style>
 </head>
 <body>
-    hello world!
-    <button>Klick</button>
+  <div class="app">
+    <header>
+      <div>
+        <h1>LyricLearner</h1>
+        <p>Phone-first: Lyrics einfügen → auswendig lernen (jetpunk-style)</p>
+      </div>
+    </header>
+
+    <section class="card controls" aria-labelledby="inputLabel">
+      <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+        <label id="inputLabel" class="small">Lyrics (einfügen oder reinschreiben)</label>
+        <textarea id="lyricsInput" placeholder="Hier Lyrics einfügen..." spellcheck="false"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button id="loadBtn" class="btn">Load</button>
+          <button id="resetBtn" class="btn ghost">Reset</button>
+          <button id="revealBtn" class="btn warn">Alles aufdecken</button>
+          <button id="copyMaskBtn" class="btn ghost">Maskierte Lyrics kopieren</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card display" aria-live="polite">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="meta">
+          <div class="small">Gefundene Wörter: <span id="foundCount">0</span>/<span id="totalCount">0</span></div>
+          <div class="small">(Einzigartige: <span id="uniqueLeft">0</span>)</div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress" aria-hidden="true"><i id="progBar"></i></div>
+          <div class="small" id="percent">0%</div>
+        </div>
+      </div>
+
+      <div class="lyrics sp" id="lyricsDisplay">Füge Lyrics ein und klicke <strong>Load</strong>.</div>
+    </section>
+
+    <div class="bottom">
+      <div class="guess">
+        <input id="guessInput" placeholder="Schreibe ein Wort — es wird automatisch geprüft" autocomplete="off" />
+        <button id="hintBtn" class="btn ghost">Tipp</button>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end">
+        <div class="small">Fehlend: <span id="missingCount">0</span></div>
+      </div>
+    </div>
+
+    <footer style="opacity:0.9">
+      <div class="small">Tip: Wort exakt eingeben (Groß-/Kleinschreibung und Satzzeichen werden ignoriert). Mehrfache Vorkommen werden gleichzeitig aufgedeckt.</div>
+      <div class="small">© LyricLearner</div>
+    </footer>
+  </div>
+
+  <script>
+    // --- Utilities ---
+    const qs = s => document.querySelector(s);
+    const escapeHTML = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    // Normalize: lowercase, remove diacritics and apostrophes and non-alphanumerics so matching is forgiving
+    function normalizeWord(s){
+      return s
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[’'`´]/g, '')
+        .replace(/[^\p{L}\p{N}_-]+/gu, '');
+    }
+
+    // Tokenizer: splits text into word tokens and non-word tokens, preserves all punctuation and whitespace
+    function tokenize(text){
+      const wordRE = /[\p{L}\p{N}’'`´-]+/gu;
+      let tokens = [];
+      let last = 0;
+      for(const m of text.matchAll(wordRE)){
+        const start = m.index;
+        const w = m[0];
+        if(start > last){
+          tokens.push({text: text.slice(last,start), normalized: null, revealed: true});
+        }
+        tokens.push({text: w, normalized: normalizeWord(w), revealed:false});
+        last = start + w.length;
+      }
+      if(last < text.length) tokens.push({text: text.slice(last), normalized: null, revealed: true});
+      return tokens;
+    }
+
+    // State
+    let tokens = [];
+    let totalOccurrences = 0;
+    let revealedOccurrences = 0;
+    let normMap = new Map(); // normalized -> {count:occurrences, indices: [i,...], revealedCount}
+
+    // DOM refs
+    const lyricsInput = qs('#lyricsInput');
+    const loadBtn = qs('#loadBtn');
+    const resetBtn = qs('#resetBtn');
+    const revealBtn = qs('#revealBtn');
+    const copyMaskBtn = qs('#copyMaskBtn');
+    const lyricsDisplay = qs('#lyricsDisplay');
+    const foundCount = qs('#foundCount');
+    const totalCount = qs('#totalCount');
+    const missingCount = qs('#missingCount');
+    const uniqueLeft = qs('#uniqueLeft');
+    const progBar = qs('#progBar');
+    const percent = qs('#percent');
+    const guessInput = qs('#guessInput');
+    const hintBtn = qs('#hintBtn');
+
+    function buildIndex(){
+      normMap.clear();
+      totalOccurrences = 0;
+      revealedOccurrences = 0;
+      tokens.forEach((t, idx) => {
+        if(t.normalized){
+          totalOccurrences++;
+          const key = t.normalized;
+          if(!normMap.has(key)) normMap.set(key, {count:0, indices:[], revealed:0});
+          const entry = normMap.get(key);
+          entry.count++;
+          entry.indices.push(idx);
+          if(t.revealed) { entry.revealed++; revealedOccurrences++; }
+        }
+      });
+    }
+
+    function render(){
+      // render lyrics
+      const html = tokens.map(t => {
+        if(t.normalized === null) return escapeHTML(t.text);
+        if(t.revealed) return `<span class="revealed">${escapeHTML(t.text)}</span>`;
+        // unrevealed: show a blank placeholder with width proportionate to length
+        const len = Math.max(1, Array.from(t.text).length);
+        const w = Math.min(14, Math.max(4, Math.round(len * 0.6))); // ch unit approximation
+        return `<span class="unrevealed" style="min-width:${w}ch" data-len="${len}"></span>`;
+      }).join('');
+      lyricsDisplay.innerHTML = html;
+
+      // stats
+      foundCount.textContent = revealedOccurrences;
+      totalCount.textContent = totalOccurrences;
+      missingCount.textContent = Math.max(0, totalOccurrences - revealedOccurrences);
+      // unique left
+      let uniqLeft = 0;
+      for(const [k,v] of normMap){ if(v.revealed < v.count) uniqLeft++; }
+      uniqueLeft.textContent = uniqLeft;
+      // progress
+      const pct = totalOccurrences === 0 ? 0 : Math.round((revealedOccurrences/totalOccurrences)*100);
+      progBar.style.width = pct + '%';
+      percent.textContent = pct + '%';
+    }
+
+    function loadLyrics(){
+      const text = lyricsInput.value.trim();
+      if(!text) return alert('Bitte zuerst Lyrics einfügen.');
+      tokens = tokenize(text);
+      buildIndex();
+      render();
+      guessInput.focus();
+    }
+
+    function resetAll(){
+      // mark all word tokens as unrevealed
+      tokens.forEach(t=>{ if(t.normalized) t.revealed = false; });
+      buildIndex(); render();
+    }
+
+    function revealAll(){
+      let newly = 0;
+      tokens.forEach(t=>{ if(t.normalized && !t.revealed){ t.revealed = true; newly++; } });
+      buildIndex(); render();
+      if(newly) flashDisplay();
+    }
+
+    function flashDisplay(){ lyricsDisplay.classList.add('flash'); setTimeout(()=>lyricsDisplay.classList.remove('flash'),700); }
+
+    function revealNormalized(norm){
+      if(!norm) return;
+      const entry = normMap.get(norm);
+      if(!entry) return false; // no such word
+      let newly = 0;
+      for(const idx of entry.indices){
+        if(!tokens[idx].revealed){ tokens[idx].revealed = true; newly++; }
+      }
+      if(newly){
+        // update counts
+        revealedOccurrences += newly;
+        entry.revealed = entry.count; // fully revealed
+        render();
+        flashDisplay();
+        return true;
+      }
+      return false;
+    }
+
+    // Guess handling: autocheck on input
+    guessInput.addEventListener('input', e => {
+      const raw = e.target.value;
+      const trimmed = raw.trim();
+      if(!trimmed) return; // nothing to check
+      const norm = normalizeWord(trimmed);
+      if(!norm) return; // nothing left after normalization
+      // If matches known normalized word and not fully revealed then reveal
+      const entry = normMap.get(norm);
+      if(entry && entry.revealed < entry.count){
+        revealNormalized(norm);
+        e.target.value = '';
+      }
+    });
+
+    // Also handle 'space' or punctuation end: user might type word then space; input event above catches this because trimmed removes space.
+
+    // Hint: reveal a random unrevealed unique word's length
+    hintBtn.addEventListener('click', () => {
+      const unrevealedKeys = Array.from(normMap.entries()).filter(([k,v])=>v.revealed < v.count);
+      if(unrevealedKeys.length === 0) return alert('Alle Wörter sind bereits aufgedeckt!');
+      const [key, val] = unrevealedKeys[Math.floor(Math.random()*unrevealedKeys.length)];
+      // find an instance to show pattern
+      const idx = val.indices.find(i => !tokens[i].revealed);
+      const word = tokens[idx].text;
+      // put a hint into the input (first letter + underscores)
+      const hint = word[0] + '_'.repeat(Math.max(1, word.length-1));
+      guessInput.value = ''; // clear
+      // show a temporary toast style (simple alert replacement)
+      guessInput.placeholder = `Tipp: ${hint}`;
+      setTimeout(()=>{ guessInput.placeholder = 'Schreibe ein Wort — es wird automatisch geprüft'; }, 3500);
+    });
+
+    // Buttons
+    loadBtn.addEventListener('click', loadLyrics);
+    resetBtn.addEventListener('click', ()=>{ if(confirm('Zurücksetzen? Alle Antworten werden versteckt.')) resetAll(); });
+    revealBtn.addEventListener('click', ()=>{ if(confirm('Alles aufdecken?')) revealAll(); });
+    copyMaskBtn.addEventListener('click', ()=>{
+      // produce masked HTML as plain text (placeholders for unrevealed words)
+      const masked = tokens.map(t=> t.normalized ? (t.revealed ? t.text : '▯'.repeat(Math.max(1, Array.from(t.text).length))) : t.text ).join('');
+      navigator.clipboard?.writeText(masked).then(()=>alert('Maskierte Lyrics kopiert.'), ()=>alert('Kopieren nicht möglich.'));
+    });
+
+    // Utility: when user presses Enter in guessInput, clear it to avoid newlines on some phones
+    guessInput.addEventListener('keydown', e => {
+      if(e.key === 'Enter'){
+        e.preventDefault();
+        guessInput.value = '';
+      }
+    });
+
+    // init sample
+    lyricsInput.value = `Yesterday, all my troubles seemed so far away\nNow it looks as though they're here to stay\nOh, I believe in yesterday`;
+    // Optionally automatically load on first open
+    // loadLyrics();
+
+    // Ensure focus on mobile after clicking load
+    window.addEventListener('resize', ()=>{});
+  </script>
 </body>
 </html>
